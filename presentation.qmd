@@ -1,7 +1,7 @@
 ---
-title: "Presentation"
+title: "Identification and Causation"
 author: "Lachlan Deer"
-institute: "Somewhere"
+institute: "Social Media and Web Analytics, Spring 2024"
 format: 
   beamer: 
     aspectratio: 32
@@ -9,34 +9,876 @@ format:
     theme: cousteau
 ---
 
-# In the morning
+```{r, echo=FALSE}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(broom)
+library(infer)
+library(ggrepel)
+```
 
-## Getting up
+## Learning Goals
 
-- Turn off alarm
-- Get out of bed
+# Identification
 
-## Breakfast
+## The Data Generating Process
 
-- Eat eggs
-- Drink coffee
+* One way to think about science generally is that there are regular laws that govern the way the universe works
 
-# In the evening
+* These laws are an example of a \alert{data generating process}
+    * They work "behind the scenes"
+    * ... i.e. we do not observe them directly
 
-## Dinner
+* We do see the data resulting from the laws
+    * From which we try describe or test the which laws are actually at play 
+    * ... based on whether the data support their predictions
 
-- Eat spaghetti
-- Drink wine
+* In social science and business, these laws are less well behaved and more imprecise than the hard sciences 
+    * But we do believe data comes from somewhat regular laws
 
-## Going to sleep
+## Data Generating Processes 
 
-- Get in bed
-- Count sheep
+* Two parts to a data generating process (DGP)
+    1. Parts we know 
+    2. Parts we do not know
+        * What we want to learn about
 
-# Before I Sleep
+* The parts we know are still important
+    * We don't start from "nothing" each time we embark on something new 
+    * It helps us refine how we think about what we don't know 
 
-## I write equations
+## A Simple DGP
+
+1. Income is log-normally distributed
+2. Being brown-haired gives you a 10% income boost
+3. 20% of people are naturally brown-haired
+4. Having a college degree gives you a 20% income boost
+5. 30% of people have college degrees
+6. 40% of people who don’t have brown hair or a college degree will choose to dye their hair brown
+
+Let's generate data from these laws and view the results!
+
+## Simulating Data from a DGP
+
+```{r, echo = TRUE}
+set.seed(987987)
+
+df <- 
+    tibble(College = runif(5000) < .3) %>%
+    mutate(Hair = case_when(
+                runif(5000) < .2+.8*.4*(!College) ~ "Brown",
+                TRUE ~ "Other Color"
+                ),
+    logIncome = .1*(Hair == "Brown") + 
+                .2*College + rnorm(5000) + 5 
+           )
+``` 
+
+## Visualizing Data from a DGP
+
+```{r, echo = FALSE, out.width = "80%", fig.align='center'}
+ggplot(df %>% filter(Hair == "Brown"), aes(x = logIncome, linetype = Hair)) +
+  stat_density(geom = 'line', size = 1) +
+  stat_density(data = df %>% filter(Hair == "Other Color"), 
+               geom = 'line', size = 1) +
+  theme_bw() + 
+  labs(x = "Log Income", y = "Density") + 
+  theme(text         = element_text(size = 16),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.position = c(.2,.8),
+        legend.background = element_rect())
+```
+
+## Learning About the DGP
+
+\begin{center}
+We do not know what the laws are ... we only observe the data
+\end{center}
+
+* \textbf{\alert{Research Question}}: What is the effect of being brown-haired on income?
+
+```{r}
+df %>%
+  group_by(Hair) %>%
+  summarize(`Log Income` = round(mean(logIncome),3)) 
+```
+
+Suggests that brown haired people earn approx. 1% more than people with other colors
+
+* But our laws say this effect is 10%!
+
+## Learning About the DGP
+
+\begin{center}
+Let's imagine we know everything about the data generating process \textit{except} the effect of brown hair on income
+\end{center}
+
+* Helps us get at the right answer ...
+    * Among college students nobody is dying their hair
+    * So there's no reason we can see why brown hair and income might be related except for brown hair giving you an income boost
+
+$\implies$ let's focus only on college students and re-run our summary statistics
+
+## Learning About the DGP
+
+```{r}
+df %>%
+  filter(College) %>%
+  group_by(Hair) %>%
+  summarize(`Log Income` = round(mean(logIncome),3))
+```
+Now we see the effect is 13% ... 
+
+* Closer to 10%!
+* Difference is due to **randomness** 
+
+## Re-Running Our Experiment Many Times
+
+What if we re-run the experiment 1000 times?
+
+```{r, echo = FALSE, cache=TRUE, out.width = "70%", fig.align='center'}
+sim_data = function(){
+    df <- 
+    tibble(College = runif(5000) < .3) %>%
+    mutate(Hair = case_when(
+                runif(5000) < .2+.8*.4*(!College) ~ "Brown",
+                TRUE ~ "Other Color"
+                ),
+    logIncome = .1*(Hair == "Brown") + 
+                .2*College + rnorm(5000) + 5 
+           )
+return(df)
+}
+
+set.seed(42)
+all_data <- tibble::enframe(replicate(n = 1000, 
+                                      sim_data(), 
+                                      simplify = FALSE)
+                            )
+
+all_data <- tidyr::unnest(all_data, cols = c(value))
+
+whole_pop <-
+    all_data %>%
+    group_by(name, Hair) %>%
+    summarize(log_income = round(mean(logIncome),3)) %>%
+    tidyr::pivot_wider(names_from = Hair, values_from = log_income) %>%
+    janitor::clean_names() %>%
+    ungroup() %>%
+    mutate(all_dif = brown - other_color)
+
+
+ college_only <-
+    all_data %>%
+    filter(College) %>%
+    group_by(name, Hair) %>%
+    summarize(log_income = round(mean(logIncome),3)) %>%
+    tidyr::pivot_wider(names_from = Hair, values_from = log_income) %>%
+    janitor::clean_names() %>%
+    ungroup() %>%
+    mutate(college_dif = brown - other_color)
+
+
+comparison <-
+    whole_pop %>%
+    inner_join(college_only, by = c("name"))
+
+comparison %>%
+    ggplot() + 
+    stat_density(aes(x=all_dif), geom = 'line', size = 1, color = "blue") +
+    stat_density(aes(x=college_dif), geom = 'line', size = 1, color = "purple") +
+    geom_vline(xintercept = 0.1, color = "red", linetype = 2) + 
+      theme_bw() + 
+      labs(x = "Effect of Brown Hair", y = "Density") + 
+        theme(text         = element_text(size = 16),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.position = c(.2,.8),
+        legend.background = element_rect())
+```
+
+\begin{center}
+Using what we know can help us get the right answer!
+\end{center}
+
+## How the Heck did that Work?
+
+We get the right answer ... 
+
+* Or close enough when we had one sample
+* On average when we had access to many samples
+
+* The right answer involved using our knowledge of the DGP 
+    * But how exactly?
+
+* Two ideas where at play
+    * \alert{Looking for variation}
+    * \alert{Identification}
+* ... Let's consider these in turn ...
+    
+## Example: Price & Volume of Avocados
+
+```{r, echo = FALSE, out.width = "80%", fig.align='center'}
+avocados <- 
+    read_csv("data/avocado.csv") %>%
+    janitor::clean_names() %>%
+    filter(region == "California",
+           type == "conventional")
+
+
+ggplot(avocados, aes(y = total_volume/1e6, x = average_price)) + 
+  geom_point(size = 1)+
+  theme_bw() + 
+  theme(text         = element_text(size = 16),
+          axis.title.x = element_text(size = 16),
+          axis.title.y = element_text(size = 16)
+        ) +
+  labs(y = "Total Avocados Sold (Millions)",
+       x = "Average Avocado Price",
+       title = "",
+       caption = "Data from Hass Avocado Board\nc/o https://www.kaggle.com/datasets/neuromusic/avocado-prices")
+```
+
+## Example: Price & Volume of Avocados
+
+Answer the following three questions:
+
+1. What conclusions can you draw from the previous figure?
+2. What research question could you answer with this data?
+3. Can you answer your question in (2) using the figure?
+
+## Answers to the questions 
+
+1. avocado sales tend to be lower in weeks where the price of avocados is high
+2. what is the effect of a price increase on the number of avocados people buy
+3. No, covariation is not enough!
+
+## Covariation is Not Enough
+
+Consider these datapoints from two consecutive weeks
+
+```{r, echo = FALSE, out.width="80%", fig.align='center'}
+avocados %>%
+    mutate(isolate = row_number() %in% 4:5) %>%
+    ggplot(aes(y = total_volume/1e6, x = average_price, alpha = isolate)) + 
+    geom_point(size = 2)+
+    theme_bw()+
+    guides(alpha = "none") + 
+    scale_alpha_manual(values = c(0,1)) +
+    geom_label_repel(aes(label = as.character(date)), direction = 'y') +
+    theme(text         = element_text(size = 16),
+          axis.title.x = element_text(size = 16),
+          axis.title.y = element_text(size = 16)
+        ) +
+    labs(y = "Total Avocados Sold (Millions)",
+       x = "Average Avocado Price",
+       title = "",
+       caption = "Data from Hass Avocado Board\nc/o https://www.kaggle.com/datasets/neuromusic/avocado-prices")
+```
+
+## Covariation is Not Enough
+
+Why did price drop and quantity rise from January to February that year?
+
+* Is it because a drop in price made people buy more? 
+* Is it because the market was flooded with avocados so people wouldn't pay as much for them? 
+* Is it because the high price in January made suppliers bring way more avocados to market in February?
+
+It's probably a little bit of all of these reasons
+
+## Where's Your Variation?
+
+how can we find the variation in the data that answers our question?
+
+We have to ask what is the variation that we want to find?
+we want variation in people buying avocados (rather than people selling them) that is driven by changes in the price
+
+We need to use what we know about the data generating process to learn a little more
+ 
+## "Useful" Variation & Assumptions 
+
+* Assume: at the beginning of each month, avocado suppliers make a plan for what avocado prices will be each week in that month, and never change their plans until the next month
+    * Avocado sellers cannot respond to unexpected jumps in demand week-to-week within a month
+
+* $\implies$ Variation in price and quantity from week to week in the same month will isolate variation in people buying avocados can only be driven by changes in the price
+    * We would only want to use week-to-week variation with months to answer our research question
+    * (Lurking question): How do we do it?!
+
+* Finding where the variation you're interested in is lurking and isolating just that part so you know that you're answering your research question - is called \textbf{\alert{identification}}
+
+
+## Identification
+
+* \textbf{\alert{Identification}} is the process of figuring out what part of the variation in your data answers your research question
+    * Ensureing that our calculation identifies a single theoretical mechanism of interest
+
+
+* A research question takes us from theory to hypothesis
+* Identification takes us from hypothesis to the data
+    * Making sure that we have a way of testing that hypothesis in the data
+    * And not accidentally testing some other hypothesis instead.
+
+**This course**: Variation based on (quasi-) experiments in the field
+
+# Example: What Drives Demand for Playlists on Spotify?
+
+## What Drives Demand for Playlists on Spotify?
+
+Read the paper "[What Drives Demand for Playlists on Spotify?](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4079693)" and answer the following questions:
+
+* What is the research question?
+* What variation in the data to they use to answer their question?
+* (Hard!) Explain why this is the "right" variation to use.
+
+(Don't worry about the methods they use)
+
+## Discussion
+
+# Wrap Up
+
+## Context and Omniscience
+
+* Understanding context is incredibly important
+* Enables you to block alternative explanations and identify the answer to your question
+
+"Here the challenges are not primarily technical in the sense of requiring new theorems or estimators. Rather, progress comes from detailed institutional knowledge and the careful investigation and quantification of the forces at work in a particular setting. Of course, such endeavors are not really new. They have always been at the heart of good empirical research." Joshua Angrist and Alan Krueger (2001)
+
+* No research project is perfect, some are useful
+
+## Summary
+
+* TBD
+
+# Causation & Experiments
+
+## TBD
+
+# Example: Encouraging Donors to Share About Charity
+
+## Intervention Context
+
+* \textbf{\alert{Research Question}}: Can we effectively get donors to share about charitable donations?
+
+* \textbf{\alert{Why is this relevant?}}
+    * Raises awareness and bolsters fundraising efforts for good causes
+
+* This isn't easy: Donors face a trade off
+    - -ve: (Personal) Reputation risks via appearing braggy or inauthentic, vs.
+    - +ve: (External) Word of Mouth benefits to the charity
+
+* Today we'll explore this question in the context of charitable giving for educational projects, and an intervention that encourages sharing about the charity after donation
+    * $Y_i =$ clicking on a sharing pop-up OR recruiting future donors (0/1)
+    * $T_i =$ an intervention encouraging sharing about cause post-donation (0/1)
+
+## Importing the Data
+
+```{r, message=FALSE, echo =TRUE}
+charity <- 
+    read_csv("data/exp2data.csv") %>%
+    mutate(condition = if_else(condition ==1, 
+                               "treatment", 
+                               "control"
+                               )
+    )
+```
+
+## Inspecting the Data
+
+```{r, echo = TRUE}
+head(charity, n = 5)
+```
+
+## What is our data?
+
+**Units**: objects being studied.
+
+* Usually the rows of the data set.
+* Examples: Survey respondents, consumers, firms, app users, influencers.
+* Today's data: Charity Donors from DonorsChoose.org
+
+**Variables**: measurements that can vary across units.
+
+* Usually the columns of a data set.
+* Examples: quantity bought, dollars spent, participation in an experiment.
+* Today's data: Amount donated, clicked through pop up, referred a friend, treatment status, 
+
+# Causality 
+
+## Causal Questions 
+
+\alert{Does} cause based solicitation *increase* sharing? 
+
+\alert{Does} cause based solicitation recruit *more* future donors?
+
+$\rightarrow$ Comparison between factual and counterfactual
+
+**Fundamental problem of causal inference**: Analyst must infer counterfactual outcomes
+
+*No* causation without manipulation: **immutable characteristics**
+
+## A Tale of Two Donors
+
+```{r, echo = FALSE}
+charity %>% filter(user_id %in% c(13498, 13634))
+```
+
+\vspace{0.5cm}
+
+Did donor 13498 not share about their donation **because** they received a standard solicitation?
+
+## Notation
+
+* **Unit** (indexed by $i$): individuals who have donated
+* **Treatment variable** (causal variable of interest) $T_i$
+    *  Received solicitation that emphasizes consequences of sharing for a cause
+* **Treatment group** (treated units): Donors who recieve a "standard" solicitation
+* **Control group** (untreated units): Donors who receive the "share for a cause" solicitation
+* **Outcome variable(s)** (response variable) $Y_i$
+    * `click-through`: Donor clicks on a pop-up encouraging sharing 
+    * `recruitment`: Did donor's sharing lead to subsequent donation 
+
+## Notation 
+
+\begin{table}[]
+\begin{tabular}{l|cc}
+                                   & $T_i$ & $Y_i$ (click-through) \\
+                                   \hline
+Donor saw standard solicitation    & 0     & 0                     \\
+Donor saw solicitation for a cause & 1     & 1                    \\
+\hline
+\end{tabular}
+\end{table}
+
+## Causal Effects and Counterfactuals 
+
+* What does "$T_i$ causes $Y_i$ mean? $\rightsquigarrow$ **counterfactuals**, "*what if*"
+    * Would donor $i$ who saw the standard solicitation have clicked through if they saw the one that emphasized the cause
+* Two **potential outcomes**:
+    * $Y_i(1)$: would donor click through if saw cause based solicitation?
+    * $Y_i(0)$:  would donor click through if saw standard solicitation??
+* **Causal effect**: $Y_i(1) - Y_i(0)$
+
+* **Fundamental problem of causal inference**: only one of the two potential
+outcomes is observable per observation.
+
+## Potential Outcomes 
+
+\begin{table}[]
+\begin{tabular}{l|cccc}
+                                   & $T_i$ & $Y_i$ (click-through) & $Y_i(0)$ & $Y_i(1)$ \\
+                                   \hline
+Donor saw standard solicitation    & 0     & 0                     & 0        & ???      \\
+Donor saw solicitation for a cause & 1     & 1                     & ???      & 1       \\
+\hline
+\end{tabular}
+\end{table}
+
+\vspace{0.5cm}
+
+* **Association is not causation**
+* Need to infer the missing counterfactuals
+
+## How to Figure Out Counterfactuals 
+
+* **Need to find similar observations**!
+
+* Sounds easy ... but
+    * Harder than it sounds, and 
+    * Requires assumptions
+    
+* Today: We'll look at **randomized experiments as one solution**
+
+# Randomized Experiments 
+
+## Summation Notation
+
+* Define the **sample size** (number of observations) as $n$
+
+* Therefore, we have $n$ measurements of some variable, $(Y_1, Y_2, \ldots, T_n)$
+
+* We'll want to refer to the sum of these variables:
 
 $$
-y = x \beta + \varepsilon
+Y_1 + Y_2 + Y_3 + Y_4 + \ldots + Y_{n-1} + Y_n
 $$
+
+* This is cumbersome to write down, so we'll use the *sigma* notation
+
+$$
+\sum_{i=1}^{n} Y_i = Y_1 + Y_2 + Y_3 + Y_4 + \ldots + Y_{n-1} + Y_n
+$$
+* $\sum_{i=1}^{n} Y_i$ says
+    1. Initialize the running sum to the case when $i$ = 1.
+    2. Increment $i$ by 1 and add the new expression to the running sum.
+    3. Repeat step 2 until $i = n$.
+
+## Averages 
+
+* The **sample average** or **sample mean** is simply the sum of all values divided by the number of values
+
+$$
+\bar{Y} = \frac{1}{n} \sum_{i=1}^{n} Y_i
+$$
+* Suppose we surveyed six people, and 3 of them donated 20 dollars:
+
+$\bar{Y} = \frac{1}{6}(20 + 20 + 20 + 0 + 0 +0) = 10$
+
+## Quantity of Interest
+
+* We want to estimate the average causal effect over all units:
+
+\alert{\textbf{Sample Average Treatment Effect}} (\alert{\textbf{SATE}}) $= \frac{1}{n}\sum_{i=1}^{n} [ Y_i(1) - Y_i(0)]$
+
+* What we can estimate instead:
+
+\alert{\textbf{Difference in Means}} $= \bar{Y}_{\text{Treated}} - \bar{Y}_{\text{Control}}$
+
+where: 
+
+* $\bar{Y}_{\text{Treated}}$ is the observed average outcome in the treatment group
+* $\bar{Y}_{\text{Control}}$ is the observed average outcome in the control group
+
+* How do we ensure that the difference in means is a good estimate of the SATE?
+
+## Randomized Control Trials 
+
+* **Randomize**!
+
+* Key idea: **Randomization** of the treatment makes the treatment and control groups "identical" on average.
+* The two groups are similar in terms of all characteristics (both observed and unobserved).
+    * Control group is similar to treatment group
+    * $\rightsquigarrow$ outcome in control group $\approx$ what would have happened to treatment group if they had been in control group
+
+## Potential Problems with RCTs
+
+* **Placebo effects**:
+    * Respondents will be affected by any intervention, even if they shouldn’t have any effect.
+* **Hawthorne effects**:
+    * Respondents act differently just knowing that they are under study.
+
+Be aware of these limitations. Very few of our readings will discuss them!.
+
+## Balance Checking 
+
+* Can we determine if randomization "worked"?
+    * If it did, we shouldn’t see large differences between treatment and control group on pre-treatment variables.
+* Pre-treatment variable are those that are unaffected by treatment.
+* We can check in the actual data for some pre-treatment variable $X$
+    * $\bar{X}_{Treated}$: average value of variable for treated group.
+    * $\bar{X}_{Control}$: average value of variable for control group.
+* Under randomization, $\bar{X}_{Treated} - \bar{X}_{Control} \approx 0$
+
+## Multiple Treatments 
+
+* Instead of 1 treatment, we might have **multiple treatment arms**:
+    * Control condition
+    * Treatment A
+    * Treatment B
+    * Treatment C, etc
+* In this case, we will look at multiple comparisons:
+    * $\bar{Y}_{Treated, A} - \bar{Y}_{Control}$
+    * $\bar{Y}_{Treated, B} - \bar{Y}_{Control}$
+    * $\bar{Y}_{Treated, A} - \bar{Y}_{Treated, B}$
+
+# Example: Encouraging Donors to Share About Charity
+
+## Study Design: Setting
+
+:::: {.columns}
+
+::: {.column width="50%"}
+
+\vspace{1.5cm}
+
+**When**: Four-week period from August 13, 2020, to September 9, 2020
+
+\vspace{0.5cm}
+
+**Where**: DonorsChoose.org
+:::
+
+::: {.column width="50%"}
+\centering
+\includegraphics[width=6cm]{figs/BR-Donorschoose.jpg}
+
+:::
+
+::::
+\footnotesize
+
+Discussion based on: Silver & Small. (2023). [Put Your Mouth Where Your Money Is: A Field Experiment Encouraging Donors to Share About Charity](https://doi.org/10.1287/mksc.2023.1450)
+
+
+## Study Design: Treatments
+
+**Control Condition**: 
+
+> "Share this classroom with family and friends"
+
+**Treatment Condition**:
+
+> "Your donation can start a chain reaction, but only if you tell others about the cause. Share this classroom with family and friends"
+
+
+## Study Design: Sharing Contributions
+
+:::: {.columns}
+
+::: {.column width="33%"}
+\centering
+\includegraphics[width=4cm]{figs/facebook.png}
+:::
+
+::: {.column width="33%"}
+\centering
+\includegraphics[width=4cm]{figs/twitter.png}
+:::
+
+::: {.column width="33%"}
+\centering
+\includegraphics[width=4cm]{figs/gmail.png}
+:::
+
+::::
+
+## Visualizing the Outcomes
+
+:::: {.columns}
+
+::: {.column width="50%"}
+```{r}
+charity %>% 
+    group_by(condition) %>%
+    summarize(click = mean(clickthrough),
+              std_err = sd(clickthrough) / sqrt(n())
+              )%>%
+    ggplot() +
+    geom_bar(aes(x=condition, y=click), stat="identity", fill="skyblue", alpha=0.7) +
+    geom_errorbar( aes(x=condition, ymin=click-std_err, ymax=click+std_err), width=0.4, colour="orange", alpha=0.9, size=1.5) +
+    # scale_y_continuous(limits=c(.13,.155), oob = scales::squish) +
+    theme_bw() + 
+    ggtitle("Clickthrough Rate") +
+    theme(text = element_text(size=28),
+          plot.title = element_text(hjust = 0.5))
+
+```
+:::
+
+::: {.column width="50%"}
+```{r}
+charity %>% 
+    group_by(condition) %>%
+    summarize(recruit = mean(recruited),
+              std_err = sd(clickthrough) / sqrt(n())
+              )%>%
+    ggplot() +
+    geom_bar(aes(x=condition, y=recruit), stat="identity", fill="skyblue", alpha=0.7) +
+    geom_errorbar( aes(x=condition, ymin=recruit-std_err, ymax=recruit+std_err), width=0.4, colour="orange", alpha=0.9, size=1.5) +
+    # scale_y_continuous(limits=c(.025,.035), oob = scales::squish) +
+    theme_bw() +
+    ggtitle("Recruitment Rate") +
+    theme(text = element_text(size=28),
+          plot.title = element_text(hjust = 0.5))
+
+```
+:::
+
+::::
+
+## Visualizing the Data ... and Cutting the axis
+
+:::: {.columns}
+
+::: {.column width="50%"}
+```{r}
+charity %>% 
+    group_by(condition) %>%
+    summarize(click = mean(clickthrough),
+              std_err = sd(clickthrough) / sqrt(n())
+              )%>%
+    ggplot() +
+    geom_bar(aes(x=condition, y=click), stat="identity", fill="skyblue", alpha=0.7) +
+    geom_errorbar( aes(x=condition, ymin=click-std_err, ymax=click+std_err), width=0.4, colour="orange", alpha=0.9, size=1.5) +
+    scale_y_continuous(limits=c(.13,.155), oob = scales::squish) +
+    theme_bw() + 
+    ggtitle("Clickthrough Rate") +
+    theme(text = element_text(size=28),
+          plot.title = element_text(hjust = 0.5))
+
+```
+:::
+
+::: {.column width="50%"}
+```{r}
+charity %>% 
+    group_by(condition) %>%
+    summarize(recruit = mean(recruited),
+              std_err = sd(clickthrough) / sqrt(n())
+              )%>%
+    ggplot() +
+    geom_bar(aes(x=condition, y=recruit), stat="identity", fill="skyblue", alpha=0.7) +
+    geom_errorbar( aes(x=condition, ymin=recruit-std_err, ymax=recruit+std_err), width=0.4, colour="orange", alpha=0.9, size=1.5) +
+    scale_y_continuous(limits=c(.025,.035), oob = scales::squish) +
+    theme_bw() +
+    ggtitle("Recruitment Rate") +
+    theme(text = element_text(size=28),
+          plot.title = element_text(hjust = 0.5))
+
+```
+:::
+
+::::
+
+## Computing Proportions by Treatment
+
+
+```{r, echo = TRUE}
+charity %>% 
+    group_by(condition) %>%
+    summarize(click = mean(clickthrough),
+              recruit = mean(recruited))
+```
+
+## Estimating SATEs: Clickthroughs
+
+\begin{center}
+\textbf{What's the \alert{correct} statistical test?}
+\end{center}
+
+```{r, echo = FALSE}
+charity <-
+    charity %>%
+    mutate(clickthrough = as.logical(clickthrough),
+           recruited = as.logical(recruited)
+    )
+```
+
+* Test for `clickthroughs`
+```{r, echo = TRUE}
+prop_test(charity,
+          clickthrough ~ condition
+          )
+```
+
+## Estimating SATEs: Recruitment
+
+\begin{center}
+\textbf{What's the \alert{correct} statistical test?}
+\end{center}
+
+
+```{r, echo = TRUE}
+prop_test(charity,
+          recruited ~ condition
+          )
+```
+
+## Regression as Mean Estimation
+
+* Let $W_i$ be defined as follows:
+
+$$
+W_i =
+\begin{cases}
+1       \quad \text{if } i \text{ in the Treatment Group} \\
+0       \quad \text{if } i \text{ in the Control Group} \\
+\end{cases}
+$$
+
+Then we can write:
+
+$$
+Y_i = Y_i(0) + W_i (Y_i(1) - Y_i(0))
+$$
+
+## Regression as Mean Estimation
+
+Recall the the definition of $\bar{Y}_{Control}$:
+
+$$
+\begin{aligned}
+\bar{Y}_{Control} &= \frac{1}{n_0} \sum_{i=0}^{n_0} Y_i(0) \\
+&= \hat{\beta_0}
+\end{aligned}
+$$
+
+This is a consistent estimator of the expected value:
+
+$$
+\beta_0 = E[Y_i(0)]
+$$
+
+
+## Regression as Mean Estimation
+
+Then, recall our definition of difference in means:
+
+$$
+\begin{aligned}
+\text{Difference in Means} &= \bar{Y}_{\text{Treated}} - \bar{Y}_{\text{Control}} \\
+& = \frac{1}{n_1} \sum_{i=1}^{n_1} Y_i(1) - \frac{1}{n_0} \sum_{i=1}^{n_0}Y_i(0) \\
+& = \hat{\beta}_1
+\end{aligned}
+$$
+
+which is a consistent estimator of the difference in means at the population level 
+
+$$
+\beta_1 = E[Y_i(1) - Y_i(0)]
+$$
+
+## Regression as Mean Estimation
+
+Consider the regression equation:
+
+$$
+Y_i = \beta_0 + W_i \beta_1 + \varepsilon_i
+$$
+
+Then take expectations condition on treatment assignment:
+
+$$
+E(Y_i) = \beta_0 + W_i \beta_1
+$$
+
+This implies that we can estimate the ATE of a binary treatment via a linear regression of observed outcomes  $Y_i$ on a vector consisting of intercept and treatment assignment, $(1, W_i)$.
+
+## Regression-based SATE
+
+$$
+clickthrough_i = \beta_0 + \beta_1 Condition_i + \varepsilon_i
+$$
+
+```{r, echo = TRUE}
+clicks <- lm(clickthrough ~ condition, data = charity)
+tidy(clicks)
+```
+
+**In class:** Interpret these coefficients.
+
+## Regression-based SATE
+
+$$
+Recruit_i = \beta_0 + \beta_1 Condition_i + \varepsilon_i
+$$
+
+```{r, echo = TRUE}
+recruit <- lm(recruited ~ condition, data = charity)
+tidy(recruit)
+```
+
+**In class:** Interpret these coefficients.
+
+##  A Balance Test?
+
+The data provided by the authors **does not contain any information on pre-experiment variables.**
+
+Thus, we **cannot test for balance** between control and treatment groups
+
+# Wrap Up
+
+## Summary 
+
+## For next time
