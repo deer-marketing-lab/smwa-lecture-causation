@@ -1,5 +1,5 @@
 ---
-title: "Identification and Causation"
+title: "Causation & Randomized Experiments"
 author: "Lachlan Deer"
 institute: "Social Media and Web Analytics, Spring 2024"
 format: 
@@ -15,347 +15,181 @@ library(dplyr)
 library(ggplot2)
 library(broom)
 library(infer)
-library(ggrepel)
+library(dagitty)
+library(ggdag)
 ```
 
 ## Learning Goals
 
-# Identification
+* Explain the challenges of causal inference with observational data 
+* Define the term randomized experiment
+* Explain the fundamental problem of causal inference
+* Describe the Potential Outcomes framework for casual inference
+* Define the Sample Average Treatment Effect
+* Analyze data from a randomized experiment to estimate the sample average treatment effect of an intervention using statistical inference and linear regression
 
-## The Data Generating Process
+# Causation 
 
-* One way to think about science generally is that there are regular laws that govern the way the universe works
+## Causal Questions
 
-* These laws are an example of a \alert{data generating process}
-    * They work "behind the scenes"
-    * ... i.e. we do not observe them directly
+**Does X cause Y?** 
+Examples of causal questions include:
 
-* We do see the data resulting from the laws
-    * From which we try describe or test the which laws are actually at play 
-    * ... based on whether the data support their predictions
+* Does smoking cause cancer?
+* Does exercise make people happier?
+* Does my social media advertising increase sales?
+* Does hiring an influencer to promote a product lead to an increased consumer awareness about the product?
 
-* In social science and business, these laws are less well behaved and more imprecise than the hard sciences 
-    * But we do believe data comes from somewhat regular laws
+Not all causal questions use the word "*cause*". Other words that imply causality include:
 
-## Data Generating Processes 
+* Improve
+* Increase / decrease
+* Lead to
+* Make
 
-* Two parts to a data generating process (DGP)
-    1. Parts we know 
-    2. Parts we do not know
-        * What we want to learn about
+Tell-tale sign that a question is causal: analysis is used to make an argument for changing a procedure, policy, or practice.
 
-* The parts we know are still important
-    * We don't start from "nothing" each time we embark on something new 
-    * It helps us refine how we think about what we don't know 
+## Association vs Causation
 
-## A Simple DGP
+\begin{figure}
+\centering
+\includegraphics[width=12cm]{figs/nicholas_cage_drowning.png}
+\end{figure}
 
-1. Income is log-normally distributed
-2. Being brown-haired gives you a 10% income boost
-3. 20% of people are naturally brown-haired
-4. Having a college degree gives you a 20% income boost
-5. 30% of people have college degrees
-6. 40% of people who don’t have brown hair or a college degree will choose to dye their hair brown
+## The Difficulty of Casual Effects in Observational Data
 
-Let's generate data from these laws and view the results!
+**Challenge 1**: Omitted Variables (Z): variable that affects both X & Y that is not included in the analysis
 
-## Simulating Data from a DGP
+```{r, echo = FALSE, cache = TRUE, out.width="60%", fig.align='center'}
 
-```{r, echo = TRUE}
-set.seed(987987)
+dag <- dagify(y ~ x + z,
+  x ~ z,
+  exposure = "x",
+  outcome = "y"
+)
 
-df <- 
-    tibble(College = runif(5000) < .3) %>%
-    mutate(Hair = case_when(
-                runif(5000) < .2+.8*.4*(!College) ~ "Brown",
-                TRUE ~ "Other Color"
-                ),
-    logIncome = .1*(Hair == "Brown") + 
-                .2*College + rnorm(5000) + 5 
-           )
-``` 
-
-## Visualizing Data from a DGP
-
-```{r, echo = FALSE, out.width = "80%", fig.align='center'}
-ggplot(df %>% filter(Hair == "Brown"), aes(x = logIncome, linetype = Hair)) +
-  stat_density(geom = 'line', size = 1) +
-  stat_density(data = df %>% filter(Hair == "Other Color"), 
-               geom = 'line', size = 1) +
-  theme_bw() + 
-  labs(x = "Log Income", y = "Density") + 
-  theme(text         = element_text(size = 16),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.position = c(.2,.8),
-        legend.background = element_rect())
-```
-
-## Learning About the DGP
-
-\begin{center}
-We do not know what the laws are ... we only observe the data
-\end{center}
-
-* \textbf{\alert{Research Question}}: What is the effect of being brown-haired on income?
-
-```{r}
-df %>%
-  group_by(Hair) %>%
-  summarize(`Log Income` = round(mean(logIncome),3)) 
-```
-
-Suggests that brown haired people earn approx. 1% more than people with other colors
-
-* But our laws say this effect is 10%!
-
-## Learning About the DGP
-
-\begin{center}
-Let's imagine we know everything about the data generating process \textit{except} the effect of brown hair on income
-\end{center}
-
-* Helps us get at the right answer ...
-    * Among college students nobody is dying their hair
-    * So there's no reason we can see why brown hair and income might be related except for brown hair giving you an income boost
-
-$\implies$ let's focus only on college students and re-run our summary statistics
-
-## Learning About the DGP
-
-```{r}
-df %>%
-  filter(College) %>%
-  group_by(Hair) %>%
-  summarize(`Log Income` = round(mean(logIncome),3))
-```
-Now we see the effect is 13% ... 
-
-* Closer to 10%!
-* Difference is due to **randomness** 
-
-## Re-Running Our Experiment Many Times
-
-What if we re-run the experiment 1000 times?
-
-```{r, echo = FALSE, cache=TRUE, out.width = "70%", fig.align='center'}
-sim_data = function(){
-    df <- 
-    tibble(College = runif(5000) < .3) %>%
-    mutate(Hair = case_when(
-                runif(5000) < .2+.8*.4*(!College) ~ "Brown",
-                TRUE ~ "Other Color"
-                ),
-    logIncome = .1*(Hair == "Brown") + 
-                .2*College + rnorm(5000) + 5 
-           )
-return(df)
-}
-
-set.seed(42)
-all_data <- tibble::enframe(replicate(n = 1000, 
-                                      sim_data(), 
-                                      simplify = FALSE)
-                            )
-
-all_data <- tidyr::unnest(all_data, cols = c(value))
-
-whole_pop <-
-    all_data %>%
-    group_by(name, Hair) %>%
-    summarize(log_income = round(mean(logIncome),3)) %>%
-    tidyr::pivot_wider(names_from = Hair, values_from = log_income) %>%
-    janitor::clean_names() %>%
-    ungroup() %>%
-    mutate(all_dif = brown - other_color)
-
-
- college_only <-
-    all_data %>%
-    filter(College) %>%
-    group_by(name, Hair) %>%
-    summarize(log_income = round(mean(logIncome),3)) %>%
-    tidyr::pivot_wider(names_from = Hair, values_from = log_income) %>%
-    janitor::clean_names() %>%
-    ungroup() %>%
-    mutate(college_dif = brown - other_color)
-
-
-comparison <-
-    whole_pop %>%
-    inner_join(college_only, by = c("name"))
-
-comparison %>%
-    ggplot() + 
-    stat_density(aes(x=all_dif), geom = 'line', size = 1, color = "blue") +
-    stat_density(aes(x=college_dif), geom = 'line', size = 1, color = "purple") +
-    geom_vline(xintercept = 0.1, color = "red", linetype = 2) + 
-      theme_bw() + 
-      labs(x = "Effect of Brown Hair", y = "Density") + 
-        theme(text         = element_text(size = 16),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.position = c(.2,.8),
-        legend.background = element_rect())
-```
-
-\begin{center}
-Using what we know can help us get the right answer!
-\end{center}
-
-## How the Heck did that Work?
-
-We get the right answer ... 
-
-* Or close enough when we had one sample
-* On average when we had access to many samples
-
-* The right answer involved using our knowledge of the DGP 
-    * But how exactly?
-
-* Two ideas where at play
-    * \alert{Looking for variation}
-    * \alert{Identification}
-* ... Let's consider these in turn ...
+ggdag(dag, 
+      layout = "circle",
+      node_size = 20,
+      text_size = 10) +
+    geom_dag_edges(edge_width = 2, 
+                   #alpha = 0.4,
+                   arrow_directed = grid::arrow(length = grid::unit(14, "pt"), type = "closed"),
+                   arrow_bidirected = grid::arrow(length = grid::unit(14, "pt"), 
+                                                  ends = "both", type ="closed"
+                                                  ),
     
-## Example: Price & Volume of Avocados
-
-```{r, echo = FALSE, out.width = "80%", fig.align='center'}
-avocados <- 
-    read_csv("data/avocado.csv") %>%
-    janitor::clean_names() %>%
-    filter(region == "California",
-           type == "conventional")
+                   ) + 
+    theme_dag_blank()
 
 
-ggplot(avocados, aes(y = total_volume/1e6, x = average_price)) + 
-  geom_point(size = 1)+
-  theme_bw() + 
-  theme(text         = element_text(size = 16),
-          axis.title.x = element_text(size = 16),
-          axis.title.y = element_text(size = 16)
-        ) +
-  labs(y = "Total Avocados Sold (Millions)",
-       x = "Average Avocado Price",
-       title = "",
-       caption = "Data from Hass Avocado Board\nc/o https://www.kaggle.com/datasets/neuromusic/avocado-prices")
 ```
 
-## Example: Price & Volume of Avocados
+## Omitted Variable Bias
 
-Answer the following three questions:
+:::: {.columns}
 
-1. What conclusions can you draw from the previous figure?
-2. What research question could you answer with this data?
-3. Can you answer your question in (2) using the figure?
+::: {.column width="50%"}
+\begin{figure}
+\includegraphics[width=6cm]{figs/ovb.png}
+\end{figure}
+:::
 
-## Answers to the questions 
+::: {.column width="50%"}
+\vspace{2cm}
 
-1. avocado sales tend to be lower in weeks where the price of avocados is high
-2. what is the effect of a price increase on the number of avocados people buy
-3. No, covariation is not enough!
+Does exercise cause weightloss?
+:::
 
-## Covariation is Not Enough
+::::
 
-Consider these datapoints from two consecutive weeks
+## The Difficulty of Casual Effects in Observational Data
 
-```{r, echo = FALSE, out.width="80%", fig.align='center'}
-avocados %>%
-    mutate(isolate = row_number() %in% 4:5) %>%
-    ggplot(aes(y = total_volume/1e6, x = average_price, alpha = isolate)) + 
-    geom_point(size = 2)+
-    theme_bw()+
-    guides(alpha = "none") + 
-    scale_alpha_manual(values = c(0,1)) +
-    geom_label_repel(aes(label = as.character(date)), direction = 'y') +
-    theme(text         = element_text(size = 16),
-          axis.title.x = element_text(size = 16),
-          axis.title.y = element_text(size = 16)
-        ) +
-    labs(y = "Total Avocados Sold (Millions)",
-       x = "Average Avocado Price",
-       title = "",
-       caption = "Data from Hass Avocado Board\nc/o https://www.kaggle.com/datasets/neuromusic/avocado-prices")
+**Challenge 2**: Selection Effects: improper (non random) selection of individuals, such that the sample of cases and controls are not drawn from the same reference population
+
+```{r, cache = TRUE, out.width="60%", fig.align='center'}
+dag <- dagify(y ~ x,
+              y ~~ z,
+  x ~~ z,
+  exposure = "x",
+  outcome = "y"
+)
+
+ggdag(dag, 
+      layout = "circle",
+      node_size = 20,
+      text_size = 10) +
+    geom_dag_edges(edge_width = 2, 
+                   #alpha = 0.4,
+                   arrow_directed = grid::arrow(length = grid::unit(14, "pt"), type = "closed"),
+                   arrow_bidirected = grid::arrow(length = grid::unit(14, "pt"), 
+                                                  ends = "both", type ="closed"
+                                                  ),
+    
+                   ) + 
+    theme_dag_blank()
+
 ```
 
-## Covariation is Not Enough
+## Selection Effects
 
-Why did price drop and quantity rise from January to February that year?
+:::: {.columns}
 
-* Is it because a drop in price made people buy more? 
-* Is it because the market was flooded with avocados so people wouldn't pay as much for them? 
-* Is it because the high price in January made suppliers bring way more avocados to market in February?
+::: {.column width="50%"}
+\begin{figure}
+\includegraphics[width=6cm]{figs/selection.png}
+\end{figure}
+:::
 
-It's probably a little bit of all of these reasons
+::: {.column width="50%"}
+\vspace{1cm}
 
-## Where's Your Variation?
+Should we use to plan where to put additional armor on fighter jets based on the damage of planes that return to base? 
+:::
 
-how can we find the variation in the data that answers our question?
-
-We have to ask what is the variation that we want to find?
-we want variation in people buying avocados (rather than people selling them) that is driven by changes in the price
-
-We need to use what we know about the data generating process to learn a little more
- 
-## "Useful" Variation & Assumptions 
-
-* Assume: at the beginning of each month, avocado suppliers make a plan for what avocado prices will be each week in that month, and never change their plans until the next month
-    * Avocado sellers cannot respond to unexpected jumps in demand week-to-week within a month
-
-* $\implies$ Variation in price and quantity from week to week in the same month will isolate variation in people buying avocados can only be driven by changes in the price
-    * We would only want to use week-to-week variation with months to answer our research question
-    * (Lurking question): How do we do it?!
-
-* Finding where the variation you're interested in is lurking and isolating just that part so you know that you're answering your research question - is called \textbf{\alert{identification}}
+::::
 
 
-## Identification
+## Solutions to OVB and Selection Effects
 
-* \textbf{\alert{Identification}} is the process of figuring out what part of the variation in your data answers your research question
-    * Ensureing that our calculation identifies a single theoretical mechanism of interest
+Omitted Variable Bias and Selection Effects mean **our estimates** of the effect of X on Y **are biased**
 
+Possible Solutions:
 
-* A research question takes us from theory to hypothesis
-* Identification takes us from hypothesis to the data
-    * Making sure that we have a way of testing that hypothesis in the data
-    * And not accidentally testing some other hypothesis instead.
+1. Modelling and/or assumptions 
+2. Randomization of the intervention
 
-**This course**: Variation based on (quasi-) experiments in the field
+# Randomization
 
-# Example: What Drives Demand for Playlists on Spotify?
+## What is Randomization?
 
-## What Drives Demand for Playlists on Spotify?
+When we use the word **random** in this context, we mean:
 
-Read the paper "[What Drives Demand for Playlists on Spotify?](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4079693)" and answer the following questions:
+* Every unit has some chance (i.e., a non-zero probability) of being selected to receive the intervention or be in the control group.
+* The selection into these groups is based upon a random process
 
-* What is the research question?
-* What variation in the data to they use to answer their question?
-* (Hard!) Explain why this is the "right" variation to use.
+## The "Magic" of Randomization
 
-(Don't worry about the methods they use)
+Because our unit of analyses are **randomized to treatment and control groups**, **on average** there is **no difference** between these two groups on any **characteristics** other than their treatment.
 
-## Discussion
+Prior to treatment, on average the groups (Treatment and Control) are equivalent to one another on every observed and unobserved variable
 
-# Wrap Up
+* There is no omitted variable bias 
+* There are no selection effects
 
-## Context and Omniscience
+Can we check for randomization?
 
-* Understanding context is incredibly important
-* Enables you to block alternative explanations and identify the answer to your question
+# Application: Encouraging Donors to Share About Charity
 
-"Here the challenges are not primarily technical in the sense of requiring new theorems or estimators. Rather, progress comes from detailed institutional knowledge and the careful investigation and quantification of the forces at work in a particular setting. Of course, such endeavors are not really new. They have always been at the heart of good empirical research." Joshua Angrist and Alan Krueger (2001)
+##
 
-* No research project is perfect, some are useful
+\begin{figure}
+\includegraphics[width=12cm]{figs/pymwymi.png}
+\end{figure}
 
-## Summary
+\footnotesize
 
-* TBD
-
-# Causation & Experiments
-
-## TBD
-
-# Example: Encouraging Donors to Share About Charity
+Discussion based on: Silver & Small. (2023). [Put Your Mouth Where Your Money Is: A Field Experiment Encouraging Donors to Share About Charity](https://doi.org/10.1287/mksc.2023.1450)
 
 ## Intervention Context
 
@@ -385,6 +219,7 @@ charity <-
 ```
 
 ## Inspecting the Data
+\footnotesize
 
 ```{r, echo = TRUE}
 head(charity, n = 5)
@@ -404,7 +239,7 @@ head(charity, n = 5)
 * Examples: quantity bought, dollars spent, participation in an experiment.
 * Today's data: Amount donated, clicked through pop up, referred a friend, treatment status, 
 
-# Causality 
+# Estimating the Treatment Effect
 
 ## Causal Questions 
 
@@ -416,9 +251,8 @@ $\rightarrow$ Comparison between factual and counterfactual
 
 **Fundamental problem of causal inference**: Analyst must infer counterfactual outcomes
 
-*No* causation without manipulation: **immutable characteristics**
-
 ## A Tale of Two Donors
+\footnotesize
 
 ```{r, echo = FALSE}
 charity %>% filter(user_id %in% c(13498, 13634))
@@ -460,8 +294,7 @@ Donor saw solicitation for a cause & 1     & 1                    \\
     * $Y_i(0)$:  would donor click through if saw standard solicitation??
 * **Causal effect**: $Y_i(1) - Y_i(0)$
 
-* **Fundamental problem of causal inference**: only one of the two potential
-outcomes is observable per observation.
+* **Fundamental problem of causal inference**: only one of the two potential outcomes is observable per observation.
 
 ## Potential Outcomes 
 
@@ -478,19 +311,17 @@ Donor saw solicitation for a cause & 1     & 1                     & ???      & 
 \vspace{0.5cm}
 
 * **Association is not causation**
-* Need to infer the missing counterfactuals
+* How can we infer the missing counterfactuals?
 
 ## How to Figure Out Counterfactuals 
 
-* **Need to find similar observations**!
+* **Need to find \alert{similar} observations**!
 
 * Sounds easy ... but
     * Harder than it sounds, and 
     * Requires assumptions
     
-* Today: We'll look at **randomized experiments as one solution**
-
-# Randomized Experiments 
+* **Randomized experiments** are one possible solution**
 
 ## Summation Notation
 
@@ -521,17 +352,18 @@ $$
 $$
 \bar{Y} = \frac{1}{n} \sum_{i=1}^{n} Y_i
 $$
+
 * Suppose we surveyed six people, and 3 of them donated 20 dollars:
 
-$\bar{Y} = \frac{1}{6}(20 + 20 + 20 + 0 + 0 +0) = 10$
+$$\bar{Y} = \frac{1}{6}(20 + 20 + 20 + 0 + 0 +0) = 10$$
 
 ## Quantity of Interest
 
-* We want to estimate the average causal effect over all units:
+We want to estimate the average causal effect over all units:
 
 \alert{\textbf{Sample Average Treatment Effect}} (\alert{\textbf{SATE}}) $= \frac{1}{n}\sum_{i=1}^{n} [ Y_i(1) - Y_i(0)]$
 
-* What we can estimate instead:
+What we can estimate instead:
 
 \alert{\textbf{Difference in Means}} $= \bar{Y}_{\text{Treated}} - \bar{Y}_{\text{Control}}$
 
@@ -544,9 +376,10 @@ where:
 
 ## Randomized Control Trials 
 
-* **Randomize**!
+**Randomization**!
 
-* Key idea: **Randomization** of the treatment makes the treatment and control groups "identical" on average.
+Recall **Randomization** of the treatment makes the treatment and control groups "identical" on average.
+
 * The two groups are similar in terms of all characteristics (both observed and unobserved).
     * Control group is similar to treatment group
     * $\rightsquigarrow$ outcome in control group $\approx$ what would have happened to treatment group if they had been in control group
@@ -558,12 +391,12 @@ where:
 * **Hawthorne effects**:
     * Respondents act differently just knowing that they are under study.
 
-Be aware of these limitations. Very few of our readings will discuss them!.
+## Did the Randomization *actually* Randomize? 
 
-## Balance Checking 
+If it did, **we shouldn't see large differences** between treatment and control group on **pre-treatment variables**.
 
-* Can we determine if randomization "worked"?
-    * If it did, we shouldn’t see large differences between treatment and control group on pre-treatment variables.
+* Called "balance checking"
+
 * Pre-treatment variable are those that are unaffected by treatment.
 * We can check in the actual data for some pre-treatment variable $X$
     * $\bar{X}_{Treated}$: average value of variable for treated group.
@@ -582,7 +415,7 @@ Be aware of these limitations. Very few of our readings will discuss them!.
     * $\bar{Y}_{Treated, B} - \bar{Y}_{Control}$
     * $\bar{Y}_{Treated, A} - \bar{Y}_{Treated, B}$
 
-# Example: Encouraging Donors to Share About Charity
+# Application: Encouraging Donors to Share About Charity
 
 ## Study Design: Setting
 
@@ -606,10 +439,6 @@ Be aware of these limitations. Very few of our readings will discuss them!.
 :::
 
 ::::
-\footnotesize
-
-Discussion based on: Silver & Small. (2023). [Put Your Mouth Where Your Money Is: A Field Experiment Encouraging Donors to Share About Charity](https://doi.org/10.1287/mksc.2023.1450)
-
 
 ## Study Design: Treatments
 
@@ -881,4 +710,25 @@ Thus, we **cannot test for balance** between control and treatment groups
 
 ## Summary 
 
-## For next time
+* Causal inference with observational data is difficult due to omitted variable bias and selection effects
+* Randomized Control Trials solve these issues and allow us to estimate a Sample Average Treatment Effect by randomly allocating units of observation to either an intervention or a control condition 
+* SATE can be estimated from classical tools for statistical inference: t-tests, proportions tests and linear regression
+
+## License & Citation
+\small
+Suggested Citation:
+
+```{r, engine='out', echo=TRUE, eval = FALSE}
+@misc{smwa2024_randomized,
+      title={"Social Media and Web Analytics: Casuation and 
+             Randomized Experiments"},
+      author={Lachlan Deer},
+      year={2024},
+      url = "https://tisem-digital-marketing.github.io/2024-smwa"
+}
+```
+
+This course adheres to the principles of the [\alertb{Open Science Community of Tilburg University}](https://www.tilburguniversity.edu/research/open-science-community). 
+This initiative advocates for transparency and accessibility in research and teaching to all levels of society and thus creating more accountability and impact.
+
+This work is licensed under a [\alertb{Creative Commons Attribution-ShareAlike 4.0 International License}](http://creativecommons.org/licenses/by-sa/4.0/).
