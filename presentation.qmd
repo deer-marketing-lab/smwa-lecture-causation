@@ -290,8 +290,8 @@ Donor saw solicitation for a cause & 1     & 1                    \\
 * What does "$T_i$ causes $Y_i$ mean? $\rightsquigarrow$ **counterfactuals**, "*what if*"
     * Would donor $i$ who saw the standard solicitation have clicked through if they saw the one that emphasized the cause
 * Two **potential outcomes**:
-    * $Y_i(1)$: would donor click through if saw cause based solicitation?
-    * $Y_i(0)$:  would donor click through if saw standard solicitation??
+    * $Y_i(1)$: would donor click through if they saw cause based solicitation?
+    * $Y_i(0)$:  would donor click through if they saw standard solicitation??
 * **Causal effect**: $Y_i(1) - Y_i(0)$
 
 * **Fundamental problem of causal inference**: only one of the two potential outcomes is observable per observation.
@@ -321,7 +321,7 @@ Donor saw solicitation for a cause & 1     & 1                     & ???      & 
     * Harder than it sounds, and 
     * Requires assumptions
     
-* **Randomized experiments** are one possible solution**
+* **Randomized experiments** are one possible solution
 
 ## Summation Notation
 
@@ -576,7 +576,7 @@ charity %>%
 \textbf{What's the \alert{correct} statistical test?}
 \end{center}
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, eval = FALSE}
 charity <-
     charity %>%
     mutate(clickthrough = as.logical(clickthrough),
@@ -584,8 +584,7 @@ charity <-
     )
 ```
 
-* Test for `clickthroughs`
-```{r, echo = TRUE}
+```{r, echo = FALSE, eval = FALSE}
 prop_test(charity,
           clickthrough ~ condition
           )
@@ -598,7 +597,7 @@ prop_test(charity,
 \end{center}
 
 
-```{r, echo = TRUE}
+```{r, echo = FALSE, eval = FALSE}
 prop_test(charity,
           recruited ~ condition
           )
@@ -674,31 +673,31 @@ $$
 
 This implies that we can estimate the ATE of a binary treatment via a linear regression of observed outcomes  $Y_i$ on a vector consisting of intercept and treatment assignment, $(1, W_i)$.
 
-## Regression-based SATE
+## Regression-based SATE: clickthrough
 
 $$
 clickthrough_i = \beta_0 + \beta_1 Condition_i + \varepsilon_i
 $$
 
-```{r, echo = TRUE}
+```{r, echo = FALSE, eval =FALSE}
 clicks <- lm(clickthrough ~ condition, data = charity)
 tidy(clicks)
 ```
 
-**In class:** Interpret these coefficients.
+<!---**In class:** Interpret these coefficients.--->
 
 ## Regression-based SATE
 
 $$
-Recruit_i = \beta_0 + \beta_1 Condition_i + \varepsilon_i
+recruit_i = \beta_0 + \beta_1 Condition_i + \varepsilon_i
 $$
 
-```{r, echo = TRUE}
+```{r, echo = FALSE, eval = FALSE}
 recruit <- lm(recruited ~ condition, data = charity)
 tidy(recruit)
 ```
 
-**In class:** Interpret these coefficients.
+<!---**In class:** Interpret these coefficients.--->
 
 ##  A Balance Test?
 
@@ -706,12 +705,14 @@ The data provided by the authors **does not contain any information on pre-exper
 
 Thus, we **cannot test for balance** between control and treatment groups
 
+\alert{Question}: What pre-experiment variables would you want to use to test for balance?
+
 # Wrap Up
 
 ## Summary 
 
 * Causal inference with observational data is difficult due to omitted variable bias and selection effects
-* Randomized Control Trials solve these issues and allow us to estimate a Sample Average Treatment Effect by randomly allocating units of observation to either an intervention or a control condition 
+* Randomized Control Trials solve these issues and allow us to estimate a Sample Average Treatment Effect (SATE) by randomly allocating units of observation to either an intervention or a control condition 
 * SATE can be estimated from classical tools for statistical inference: t-tests, proportions tests and linear regression
 
 ## License & Citation
