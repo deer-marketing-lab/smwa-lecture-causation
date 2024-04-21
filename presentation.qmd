@@ -576,7 +576,7 @@ charity %>%
 \textbf{What's the \alert{correct} statistical test?}
 \end{center}
 
-```{r, echo = FALSE, eval = FALSE}
+```{r, echo = FALSE, eval = TRUE}
 charity <-
     charity %>%
     mutate(clickthrough = as.logical(clickthrough),
@@ -584,7 +584,7 @@ charity <-
     )
 ```
 
-```{r, echo = FALSE, eval = FALSE}
+```{r, echo = FALSE, eval = TRUE}
 prop_test(charity,
           clickthrough ~ condition
           )
@@ -597,7 +597,7 @@ prop_test(charity,
 \end{center}
 
 
-```{r, echo = FALSE, eval = FALSE}
+```{r, echo = FALSE, eval = TRUE}
 prop_test(charity,
           recruited ~ condition
           )
@@ -679,12 +679,12 @@ $$
 clickthrough_i = \beta_0 + \beta_1 Condition_i + \varepsilon_i
 $$
 
-```{r, echo = FALSE, eval =FALSE}
+```{r, echo = FALSE, eval =TRUE}
 clicks <- lm(clickthrough ~ condition, data = charity)
 tidy(clicks)
 ```
 
-<!---**In class:** Interpret these coefficients.--->
+**In class:** Interpret these coefficients.
 
 ## Regression-based SATE
 
@@ -692,12 +692,12 @@ $$
 recruit_i = \beta_0 + \beta_1 Condition_i + \varepsilon_i
 $$
 
-```{r, echo = FALSE, eval = FALSE}
+```{r, echo = FALSE, eval = TRUE}
 recruit <- lm(recruited ~ condition, data = charity)
 tidy(recruit)
 ```
 
-<!---**In class:** Interpret these coefficients.--->
+**In class:** Interpret these coefficients.
 
 ##  A Balance Test?
 
