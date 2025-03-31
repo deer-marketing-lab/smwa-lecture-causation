@@ -1,7 +1,7 @@
 ---
 title: "Causation & Randomized Experiments"
 author: "Lachlan Deer"
-institute: "Social Media and Web Analytics, Spring 2024"
+institute: "Social Media and Web Analytics, Spring 2025"
 format: 
   beamer: 
     aspectratio: 32
@@ -205,6 +205,61 @@ Discussion based on: Silver & Small. (2023). [Put Your Mouth Where Your Money Is
 * Today we'll explore this question in the context of charitable giving for educational projects, and an intervention that encourages sharing about the charity after donation
     * $Y_i =$ clicking on a sharing pop-up OR recruiting future donors (0/1)
     * $T_i =$ an intervention encouraging sharing about cause post-donation (0/1)
+
+## Study Design: Setting
+
+:::: {.columns}
+
+::: {.column width="50%"}
+
+\vspace{1.5cm}
+
+**When**: Four-week period from August 13, 2020, to September 9, 2020
+
+\vspace{0.5cm}
+
+**Where**: DonorsChoose.org
+:::
+
+::: {.column width="50%"}
+\centering
+\includegraphics[width=6cm]{figs/BR-Donorschoose.jpg}
+
+:::
+
+::::
+
+## Study Design: Treatments
+
+**Control Condition**: 
+
+> "Share this classroom with family and friends"
+
+**Treatment Condition**:
+
+> "Your donation can start a chain reaction, but only if you tell others about the cause. Share this classroom with family and friends"
+
+
+## Study Design: Sharing Contributions
+
+:::: {.columns}
+
+::: {.column width="33%"}
+\centering
+\includegraphics[width=4cm]{figs/facebook.png}
+:::
+
+::: {.column width="33%"}
+\centering
+\includegraphics[width=4cm]{figs/twitter.png}
+:::
+
+::: {.column width="33%"}
+\centering
+\includegraphics[width=4cm]{figs/gmail.png}
+:::
+
+::::
 
 ## Importing the Data
 
@@ -417,60 +472,6 @@ If it did, **we shouldn't see large differences** between treatment and control 
 
 # Application: Encouraging Donors to Share About Charity
 
-## Study Design: Setting
-
-:::: {.columns}
-
-::: {.column width="50%"}
-
-\vspace{1.5cm}
-
-**When**: Four-week period from August 13, 2020, to September 9, 2020
-
-\vspace{0.5cm}
-
-**Where**: DonorsChoose.org
-:::
-
-::: {.column width="50%"}
-\centering
-\includegraphics[width=6cm]{figs/BR-Donorschoose.jpg}
-
-:::
-
-::::
-
-## Study Design: Treatments
-
-**Control Condition**: 
-
-> "Share this classroom with family and friends"
-
-**Treatment Condition**:
-
-> "Your donation can start a chain reaction, but only if you tell others about the cause. Share this classroom with family and friends"
-
-
-## Study Design: Sharing Contributions
-
-:::: {.columns}
-
-::: {.column width="33%"}
-\centering
-\includegraphics[width=4cm]{figs/facebook.png}
-:::
-
-::: {.column width="33%"}
-\centering
-\includegraphics[width=4cm]{figs/twitter.png}
-:::
-
-::: {.column width="33%"}
-\centering
-\includegraphics[width=4cm]{figs/gmail.png}
-:::
-
-::::
 
 ## Visualizing the Outcomes
 
@@ -576,6 +577,12 @@ charity %>%
 \textbf{What's the \alert{correct} statistical test?}
 \end{center}
 
+## Estimating SATEs: Clickthroughs
+
+\begin{center}
+\textbf{What's the \alert{correct} statistical test?}
+\end{center}
+
 ```{r, echo = FALSE, eval = TRUE}
 charity <-
     charity %>%
@@ -584,7 +591,7 @@ charity <-
     )
 ```
 
-```{r, echo = FALSE, eval = TRUE}
+```{r, echo = TRUE, eval = TRUE}
 prop_test(charity,
           clickthrough ~ condition
           )
@@ -596,8 +603,14 @@ prop_test(charity,
 \textbf{What's the \alert{correct} statistical test?}
 \end{center}
 
+## Estimating SATEs: Recruitment
 
-```{r, echo = FALSE, eval = TRUE}
+\begin{center}
+\textbf{What's the \alert{correct} statistical test?}
+\end{center}
+
+
+```{r, echo = TRUE, eval = TRUE}
 prop_test(charity,
           recruited ~ condition
           )
@@ -605,10 +618,10 @@ prop_test(charity,
 
 ## Regression as Mean Estimation
 
-* Let $W_i$ be defined as follows:
+* Let $T_i$ be defined as follows:
 
 $$
-W_i =
+T_i =
 \begin{cases}
 1       \quad \text{if } i \text{ in the Treatment Group} \\
 0       \quad \text{if } i \text{ in the Control Group} \\
@@ -618,7 +631,7 @@ $$
 Then we can write:
 
 $$
-Y_i = Y_i(0) + W_i (Y_i(1) - Y_i(0))
+Y_i = Y_i(0) + T_i (Y_i(1) - Y_i(0))
 $$
 
 ## Regression as Mean Estimation
@@ -662,16 +675,16 @@ $$
 Consider the regression equation:
 
 $$
-Y_i = \beta_0 + W_i \beta_1 + \varepsilon_i
+Y_i = \beta_0 + T_i \beta_1 + \varepsilon_i
 $$
 
 Then take expectations condition on treatment assignment:
 
 $$
-E(Y_i) = \beta_0 + W_i \beta_1
+E(Y_i) = \beta_0 + T_i \beta_1
 $$
 
-This implies that we can estimate the ATE of a binary treatment via a linear regression of observed outcomes  $Y_i$ on a vector consisting of intercept and treatment assignment, $(1, W_i)$.
+This implies that we can estimate the ATE of a binary treatment via a linear regression of observed outcomes  $Y_i$ on a vector consisting of intercept and treatment assignment, $(1, T_i)$.
 
 ## Regression-based SATE: clickthrough
 
@@ -720,12 +733,12 @@ Thus, we **cannot test for balance** between control and treatment groups
 Suggested Citation:
 
 ```{r, engine='out', echo=TRUE, eval = FALSE}
-@misc{smwa2024_randomized,
+@misc{smwa2025_randomized,
       title={"Social Media and Web Analytics: Casuation and 
              Randomized Experiments"},
       author={Lachlan Deer},
-      year={2024},
-      url = "https://tisem-digital-marketing.github.io/2024-smwa"
+      year={2025},
+      url = "https://tisem-digital-marketing.github.io/2025-smwa"
 }
 ```
 
